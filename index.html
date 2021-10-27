@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>Shadow</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<style>
+			body { margin: 0; }
+			canvas { display: block; }
+		</style>
+	</head>
+	<body>
+		<div id="container" style="display: block; width: 100%; height: 100vh;"></div>
+
+		<script defer type="module">
+			import * as THREE from 'https://unpkg.com/three@0.121.1/build/three.module.js';
+			import { FBXLoader } from 'https://unpkg.com/three@0.121.1/examples/jsm/loaders/FBXLoader.js';
+			import { EXRLoader } from 'https://unpkg.com/three@0.121.1/examples/jsm/loaders/EXRLoader.js';
+
+			let container;
+			let camera, scene, renderer;
+			
+			let width, height, halfWidth, halfHeight;
+
+			let pngCubeRenderTarget;
+			let pngBackground;
+			let texturePath = '';
+			let path = 'models/fbx/';
+
+			let spotRadius = 160.0;
+			let spotDistance = 400.0;
+			let wallDistance = 120.0;
+
+			let cylinder;
+			let cylinderShadow;
+
+			init();
+			animate();
+
+			function setSpotOutlines()
+			{
+				let geometry;
+				let material;
+				let spotTorus;
+				let spotLines;
+				let spotOutlines;
+
+				geometry = new THREE.TorusGeometry( spotRadius, 0.2, 8, 96 );
+				material = new THREE.MeshBasicMaterial( { color: 0xe0e0ff } );
+				spotTorus = new THREE.Mesh( geometry, material );
+				spotTorus.position.z = -wallDistance;
+				
+				spotLines = [];
+				material = new THREE.LineBasicMaterial( { color: 0xe0e0ff } );
+
+				geometry = new THREE.Geometry();
+				geometry.vertices.push( new THREE.Vector3( -spotRadius, 0.0, -wallDistance ));
+				geometry.vertices.push( new THREE.Vector3( 0.0, 0.0, spotDistance ));
+				geometry.vertices.push( new THREE.Vector3( spotRadius, 0.0, -wallDistance ));
+				spotLines.push( new THREE.Line( geometry, material ) );
+
+				geometry = new THREE.Geometry();
+				geometry.vertices.push( new THREE.Vector3( 0.0, -spotRadius, -wallDistance ));
+				geometry.vertices.push( new THREE.Vector3( 0.0, 0.0, spotDistance ));
+				geometry.vertices.push( new THREE.Vector3( 0.0, spotRadius, -wallDistance ));
+				spotLines.push( new THREE.Line( geometry, material ) );
+
+				geometry = new THREE.Geometry();
+				geometry.vertices.push( new THREE.Vector3( 0.0, 0.0, -wallDistance ));
+				geometry.vertices.push( new THREE.Vector3( 0.0, 0.0, spotDistance ));
+				spotLines.push( new THREE.Line( geometry, material ) );
+
+				spotOutlines = new THREE.Group();
+				spotOutlines.add( spotLines[0], spotLines[1], spotLines[2], spotTorus );
+				scene.add( spotOutlines );
+				return ;
+			}
+
+			function setEnvironment()
+			{
+				let geometry;
+				let material;
+				let wall;
+				let spotLight;
+
+				geometry = new THREE.PlaneGeometry(2400.0, 2400.0, 32, 32);
+				material = new THREE.MeshPhongMaterial( { color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending } );
+				wall = new THREE.Mesh( geometry, material );
+				wall.position.set( 0.0, 0.0, -wallDistance );
+				scene.add( wall );
+
+				spotLight = new THREE.SpotLight( 0xffffff, 0.1, 0.0, Math.PI / 45.0, 0.6, 0.4 );
+				spotLight.position.set ( 0.0, 0.0, 2400.0 );
+				scene.add( spotLight );
+				setSpotOutlines();
+				return ;
+			}
+
+			function loadModel( object )
+			{
+				let material;
+				let environmentMap;
+				let textureLoader;
+				let normalMap;
+
+				cylinder = object;
+				textureLoader = new THREE.TextureLoader();
+				normalMap = textureLoader.load( texturePath + 'cylinder-normal.jpg');
+				cylinder.traverse( function ( child )
+				{
+					material = new THREE.MeshStandardMaterial( { color: 0xffffff, metalness: 0.75, roughness: 0.25, normalMap: normalMap, normalScale: new THREE.Vector2( 0.5, 0.5 ), envMapIntensity: 8.0 } );
+					if ( child.isMesh )
+					{
+						child.castShadow = true;
+						child.material = material;
+						environmentMap = child.material.envMap;
+						environmentMap = pngCubeRenderTarget ? pngCubeRenderTarget.texture : null;
+						child.material.envMap = environmentMap;
+						child.material.needsUpdate = true;
+					}
+				} );
+				scene.add( cylinder );
+				return ;		
+			}
+
+			function setCylinderShadow()
+			{
+				let geometry;
+				let material;
+				let euler;
+				let eulerMatrix;
+				
+				geometry = new THREE.CylinderGeometry(36.0, 36.0, 64, 32);
+				material = new THREE.MeshBasicMaterial( { color: 0xffffff, opacity: 0.5, transparent: true } );
+				cylinderShadow = new THREE.Mesh( geometry, material );
+				euler = new THREE.Euler( Math.PI * 0.5, Math.PI * 0.75, 0.0 );
+				eulerMatrix = new THREE.Matrix4().makeRotationFromEuler( euler );
+				cylinderShadow.geometry.applyMatrix( eulerMatrix );
+				cylinderShadow.scale.set( 1.0, 1.0, 0.0 );
+				cylinderShadow.position.set( 0.0, 0.0, 1.0 - wallDistance );
+				scene.add( cylinderShadow );
+				return ; 
+			}
+
+			function setCylinder()
+			{
+				let modelLoader;
+
+				modelLoader = new FBXLoader();
+				modelLoader.load( path + 'cylinder.fbx', function ( object ) {
+					loadModel( object );
+				} );
+				setCylinderShadow();
+				return ;
+			}
+
+			function init()
+			{
+				container = document.getElementById( 'container' );
+
+				width = container.clientWidth;
+				height = container.clientHeight;
+				halfWidth = width * 0.5;
+				halfHeight = height * 0.5;
+
+				camera = new THREE.OrthographicCamera( -halfWidth, halfWidth, halfHeight, -halfHeight, -800.0, 2400.0 );
+				camera.position.set( 400.0 , 480.0, 400.0 );
+				camera.rotation.set( Math.PI * -0.25, -Math.atan(-1.0 / Math.sqrt(2.0)), Math.PI * 0.1667 );
+				camera.zoom = 2.0;
+				camera.updateProjectionMatrix();
+
+				scene = new THREE.Scene();
+				scene.background = new THREE.Color( 0xf8f8ff );
+
+				THREE.DefaultLoadingManager.onLoad = function ( ) { pmremGenerator.dispose(); };
+
+				new THREE.TextureLoader().load( texturePath + 'environment.png', function ( texture ) {
+					texture.encoding = THREE.sRGBEncoding;
+					pngCubeRenderTarget = pmremGenerator.fromEquirectangular( texture );
+					pngBackground = pngCubeRenderTarget.texture;
+					texture.dispose();
+				} );
+
+				renderer = new THREE.WebGLRenderer( { antialias: true } );
+				renderer.setPixelRatio( window.devicePixelRatio );
+				renderer.setSize( container.clientWidth, container.clientHeight );
+				renderer.toneMapping = THREE.ACESFilmicToneMapping;
+				renderer.toneMappingExposure = 1.25;
+
+				const pmremGenerator = new THREE.PMREMGenerator( renderer );
+				pmremGenerator.compileEquirectangularShader();
+
+				container.appendChild( renderer.domElement );
+
+				setEnvironment();
+				setCylinder();
+
+				window.addEventListener( 'resize', onWindowResize, false );
+				return ;
+			}
+
+			function onWindowResize()
+			{
+				width = container.clientWidth;
+				height = container.clientHeight;
+				halfWidth = width * 0.5;
+				halfHeight = height * 0.5;
+
+				camera.left = -halfWidth;
+				camera.right = halfWidth;
+				camera.top = halfHeight;
+				camera.bottom = -halfHeight;
+				camera.updateProjectionMatrix();	
+				renderer.setSize( width, height );
+				return ;
+			}
+
+			function render()
+			{
+				renderer.render( scene, camera );
+				return ;
+			}
+
+			function animate()
+			{
+				let euler;
+				let eulerMatrix;
+
+				requestAnimationFrame( animate );
+				cylinder.rotation.y += 0.00872;
+				euler = new THREE.Euler( cylinder.rotation.x, cylinder.rotation.y, cylinder.rotation.z );
+				eulerMatrix = new THREE.Matrix4().makeRotationFromEuler( euler );
+				cylinderShadow.geometry.applyMatrix( eulerMatrix );
+				render();
+				cylinderShadow.geometry.applyMatrix( new THREE.Matrix4().getInverse( eulerMatrix ) );
+				return ;
+			}
+		</script>
+	</body>
+</html>
