@@ -16,20 +16,24 @@
 			import * as THREE from 'https://unpkg.com/three@0.121.1/build/three.module.js';
 			import { FBXLoader } from 'https://unpkg.com/three@0.121.1/examples/jsm/loaders/FBXLoader.js';
 			import { EXRLoader } from 'https://unpkg.com/three@0.121.1/examples/jsm/loaders/EXRLoader.js';
+			import { MathUtils } from 'https://unpkg.com/three@0.121.1/build/three.module.js';
 
 			let container;
-			let camera, scene, renderer;
+			let camera, clock, scene, renderer;
 			
 			let width, height, halfWidth, halfHeight;
 
 			let pngCubeRenderTarget;
 			let pngBackground;
-			let texturePath = '';
-			let path = 'models/fbx/';
+//			let path = '';
+			let path = 'https://www.hbruvry.com/wp-content/uploads/2021/10/';
 
-			let spotRadius = 160.0;
+			let spotRadius = 140.0;
 			let spotDistance = 400.0;
-			let wallDistance = 120.0;
+			let wallDistance = 140.0;
+			let deltaTime;
+			let target = new THREE.Vector3();
+			let targetLerp = new THREE.Vector3();
 
 			let cylinder;
 			let cylinderShadow;
@@ -46,12 +50,12 @@
 				let spotOutlines;
 
 				geometry = new THREE.TorusGeometry( spotRadius, 0.2, 8, 96 );
-				material = new THREE.MeshBasicMaterial( { color: 0xe0e0ff } );
+				material = new THREE.MeshBasicMaterial( { color: 0xc0c0ff } );
 				spotTorus = new THREE.Mesh( geometry, material );
 				spotTorus.position.z = -wallDistance;
 				
 				spotLines = [];
-				material = new THREE.LineBasicMaterial( { color: 0xe0e0ff } );
+				material = new THREE.LineBasicMaterial( { color: 0xc0c0ff } );
 
 				geometry = new THREE.Geometry();
 				geometry.vertices.push( new THREE.Vector3( -spotRadius, 0.0, -wallDistance ));
@@ -89,7 +93,7 @@
 				wall.position.set( 0.0, 0.0, -wallDistance );
 				scene.add( wall );
 
-				spotLight = new THREE.SpotLight( 0xffffff, 0.1, 0.0, Math.PI / 45.0, 0.6, 0.4 );
+				spotLight = new THREE.SpotLight( 0xffffff, 0.08, 0.0, Math.PI / 45.0, 0.6, 0.4 );
 				spotLight.position.set ( 0.0, 0.0, 2400.0 );
 				scene.add( spotLight );
 				setSpotOutlines();
@@ -99,13 +103,12 @@
 			function loadModel( object )
 			{
 				let material;
-				let environmentMap;
 				let textureLoader;
 				let normalMap;
 
 				cylinder = object;
 				textureLoader = new THREE.TextureLoader();
-				normalMap = textureLoader.load( texturePath + 'cylinder-normal.jpg');
+				normalMap = textureLoader.load( path + 'readme-cylinder-normal.jpg');
 				cylinder.traverse( function ( child )
 				{
 					material = new THREE.MeshStandardMaterial( { color: 0xffffff, metalness: 0.75, roughness: 0.25, normalMap: normalMap, normalScale: new THREE.Vector2( 0.5, 0.5 ), envMapIntensity: 8.0 } );
@@ -113,10 +116,6 @@
 					{
 						child.castShadow = true;
 						child.material = material;
-						environmentMap = child.material.envMap;
-						environmentMap = pngCubeRenderTarget ? pngCubeRenderTarget.texture : null;
-						child.material.envMap = environmentMap;
-						child.material.needsUpdate = true;
 					}
 				} );
 				scene.add( cylinder );
@@ -147,7 +146,7 @@
 				let modelLoader;
 
 				modelLoader = new FBXLoader();
-				modelLoader.load( path + 'cylinder.fbx', function ( object ) {
+				modelLoader.load( path + 'readme-cylinder.fbx', function ( object ) {
 					loadModel( object );
 				} );
 				setCylinderShadow();
@@ -164,17 +163,19 @@
 				halfHeight = height * 0.5;
 
 				camera = new THREE.OrthographicCamera( -halfWidth, halfWidth, halfHeight, -halfHeight, -800.0, 2400.0 );
-				camera.position.set( 400.0 , 480.0, 400.0 );
-				camera.rotation.set( Math.PI * -0.25, -Math.atan(-1.0 / Math.sqrt(2.0)), Math.PI * 0.1667 );
+				camera.position.set( 400.0, 240.0, 400.0 - wallDistance * 0.333 );
+				camera.lookAt( 0.0, 0.0, -wallDistance * 0.333 );
 				camera.zoom = 2.0;
 				camera.updateProjectionMatrix();
+
+				clock = new THREE.Clock();
 
 				scene = new THREE.Scene();
 				scene.background = new THREE.Color( 0xf8f8ff );
 
 				THREE.DefaultLoadingManager.onLoad = function ( ) { pmremGenerator.dispose(); };
 
-				new THREE.TextureLoader().load( texturePath + 'environment.png', function ( texture ) {
+				new THREE.TextureLoader().load( path + 'readme-environment.png', function ( texture ) {
 					texture.encoding = THREE.sRGBEncoding;
 					pngCubeRenderTarget = pmremGenerator.fromEquirectangular( texture );
 					pngBackground = pngCubeRenderTarget.texture;
@@ -196,6 +197,20 @@
 				setCylinder();
 
 				window.addEventListener( 'resize', onWindowResize, false );
+				document.addEventListener( 'mousemove', onMouseMove);
+				return ;
+			}
+
+			function onMouseMove(e)
+			{
+				let normalizedMouse;
+
+				normalizedMouse = new THREE.Vector2();
+				normalizedMouse.x = THREE.MathUtils.smootherstep( e.clientX / window.innerWidth, 0.1, 0.9 ) * 2.0 - 1.0;
+				normalizedMouse.y = -THREE.MathUtils.smootherstep( e.clientY / window.innerHeight, 0.1, 0.9 ) * 2.0 + 1.0;
+				target.x = Math.cos( Math.PI * 0.25 - Math.PI * 0.25 * normalizedMouse.x );
+				target.y = Math.sin( Math.PI * 0.5 * normalizedMouse.y ) + Math.PI * 0.125;
+				target.z = Math.sin( Math.PI * 0.25 - Math.PI * 0.25 * normalizedMouse.x );
 				return ;
 			}
 
@@ -217,6 +232,18 @@
 
 			function render()
 			{
+				let environmentMap;
+
+				cylinder.traverse( function ( child )
+				{
+					if ( child.isMesh )
+					{
+						environmentMap = child.material.envMap;
+						environmentMap = pngCubeRenderTarget ? pngCubeRenderTarget.texture : null;
+						child.material.envMap = environmentMap;
+						child.material.needsUpdate = true;
+					}
+				} );
 				renderer.render( scene, camera );
 				return ;
 			}
@@ -227,7 +254,20 @@
 				let eulerMatrix;
 
 				requestAnimationFrame( animate );
-				cylinder.rotation.y += 0.00872;
+				deltaTime = clock.getDelta();
+				if (navigator.userAgent.match(/(android|iphone|ipad|blackberry|symbian|symbianos|symbos|netfront|model-orange|javaplatform|iemobile|windows phone|samsung|htc|opera mobile|opera mobi|opera mini|presto|huawei|blazer|bolt|doris|fennec|gobrowser|iris|maemo browser|mib|cldc|minimo|semc-browser|skyfire|teashark|teleca|uzard|uzardweb|meego|nokia|bb10|playbook)/gi))
+				{
+					cylinder.rotation.x = 0;
+					cylinder.rotation.y += 0.5 * deltaTime ;
+					cylinder.rotation.z = 0;
+				} 
+				else
+				{
+					targetLerp.x = THREE.MathUtils.lerp( targetLerp.x, target.x, 6.0 * deltaTime );
+					targetLerp.y = THREE.MathUtils.lerp( targetLerp.y, target.y, 6.0 * deltaTime );
+					targetLerp.z = THREE.MathUtils.lerp( targetLerp.z, target.z, 6.0 * deltaTime );
+					cylinder.lookAt( targetLerp );
+				}
 				euler = new THREE.Euler( cylinder.rotation.x, cylinder.rotation.y, cylinder.rotation.z );
 				eulerMatrix = new THREE.Matrix4().makeRotationFromEuler( euler );
 				cylinderShadow.geometry.applyMatrix( eulerMatrix );
